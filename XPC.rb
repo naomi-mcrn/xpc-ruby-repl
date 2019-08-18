@@ -50,7 +50,7 @@ module XPC
       $_blk
     end
 
-    def block(arg)
+    def block(arg,hdonly=false)
       h = nil
       r = nil
       if arg.is_a?(String)
@@ -58,14 +58,23 @@ module XPC
       else
         blkh = getblockhash(arg)
       end
-      h = getblock(blkh,true)
-      r = getblock(blkh,false)
+      if hdonly
+        h = getblockheader(blkh,true)
+        r = getblockheader(blkh,false)
+      else
+        h = getblock(blkh,true)
+        r = getblock(blkh,false)
+      end
       if (h.nil? || r.nil?)
         nil
       else
         $_blk = Block.new(h,r)
         $_blk
       end
+    end
+
+    def header(arg)
+      block(arg,true)
     end
 
     def tx(txid)
@@ -157,6 +166,14 @@ module XPC
   end
 
   class Block < CoinPrim
+    def is_full?
+      !(@attrs["tx"].nil? || @attrs["size"].to_i < 1)
+    end
+
+    def to_full
+      $rpc_ins.block(self.txid)
+    end
+
     def version
       {dec: @attrs["version"], hex: @attrs["versionHex"]}
     end
@@ -253,7 +270,7 @@ module XPC
     end
 
     def inspect
-      "#<XPC::Block height=#{@attrs['height']} hash=#{@attrs['hash']}>"
+      "#<XPC::Block full=#{is_full?} height=#{@attrs['height']} hash=#{@attrs['hash']}>"
     end    
   end
 
