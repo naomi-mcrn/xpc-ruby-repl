@@ -1,6 +1,6 @@
 begin
   load "config.rb"
-rescue
+rescue LoadError 
   ROOT_DIR = "/home/naomi/labs/"
 end
 load ROOT_DIR + "util.rb"
