@@ -1,7 +1,7 @@
 $script_args ||= []
-if $script_args.length < 2
-  raise ArgumentError.new("wrong number of arguments (given #{$script_args.length}, expected 2)")
-end
+#if $script_args.length < 2
+#  raise ArgumentError.new("wrong number of arguments (given #{$script_args.length}, expected 2)")
+#end
 unless defined?(MintStats)
   class MintStats
     def initialize(blkrange)
@@ -24,24 +24,103 @@ unless defined?(MintStats)
       end
       (@block_range[0]..@block_range.last)
     end
+
+    def save(filename=nil)
+      begin
+        if (@rnkdata.nil? || @rnkdata.length < 1)
+          raise "mintstats not prepared"
+        end
+        if @block_range[0] + @rnkdata.length - 1 != @block_range.last
+          raise "block range is not continuous"
+        end 
+        filename = filename.to_s.split("/").last.to_s.split("\\").last.to_s.split(".").last.to_s
+        if filename != ""
+          filename = "_#{filename}"
+        end
+        fn = DATA_DIR + "mint_stats#{filename}.dat"
+        File.open(fn,"wb") do |f|
+          f.write([@block_range[0]].pack("Q!"))
+          f.write(Marshal.dump(@rnkdata))
+        end
+        true
+      rescue => e
+        puts e.to_s
+        false
+      end
+    end
+
+    def load(filename=nil)
+      begin
+        filename = filename.to_s.split("/").last.to_s.split("\\").last.to_s.split(".").last.to_s
+        if filename != ""
+          filename = "_#{filename}"
+        end
+        fn = DATA_DIR + "mint_stats#{filename}.dat"
+        _blkrng_bgn = -1
+        _rnkdat = nil
+        File.open(fn,"rb") do |f|
+          _blkrng_bgn = f.read(8).unpack("Q!")[0]
+          _rnkdat = Marshal.load(f.read(f.size - 8))
+        end
+        @block_range = (_blkrng_bgn..(_blkrng_bgn + _rnkdat.length - 1)).to_a
+        @rnkdata = _rnkdat
+        true
+      rescue => e
+        puts e.to_s
+        false
+      end
+    end
     
     def clear
       @rnkdata = nil
     end 
+
+    def supmsg(sup)
+      @supmsg = sup
+    end
     
-    def prep(blkrange=nil)
-      if blkrange
-        self.init(blkrange)
+    def addprep(blklast=nil)
+      raise "not prepared yet!" if @rnkdata.nil?
+      if blklast.nil?
+        blklast = $rpc_ins.getblockcount
       end
-      @rnkdata = []
-      fbh = @block_range[0]
-      bw = @block_range.last - fbh + 1
+      prep(blklast,:update)
+    end
+
+    def prep(blkrange=nil,mode=:new)
+      oldlast = -1
+      if blkrange
+        case mode
+          when :new
+            self.init(blkrange)
+          when :update
+            oldlast = @block_range.last
+            self.init(@block_range[0]..blkrange)
+          else
+            raise
+        end
+      end
+
+      rng = nil
+      fbh = -1
+      bw = -1
+      if mode == :new
+        rng = @block_range
+        @rnkdata = []
+        fbh = @block_range[0]
+        bw = @block_range.last - fbh + 1
+      else
+        rng = ((oldlast + 1)..@block_range.last).to_a 
+        @rnkdata ||= []
+        fbh = rng[0]
+        bw = rng.last - fbh + 1
+      end
       progper = 0
-      puts "preparing MintStats..."
-      @block_range.each do |bh|
+      puts "preparing MintStats...(mode = #{mode.to_s}, from #{rng[0]} to #{rng.last})" unless @supmsg
+      rng.each do |bh|
         bd = bh - fbh + 1
         cper = (bd * 100.0 / bw).to_i
-        if cper != progper
+        if !@supmsg && cper != progper
           puts "%03d %%" % cper
           progper = cper
         end
@@ -52,7 +131,7 @@ unless defined?(MintStats)
       (@block_range[0]..@block_range.last)
     end
     
-    def rank(type,num=10)
+    def rank(type=:count,num=10)
       num ||= 10
       if @rnkdata.nil?
         self.prep
@@ -96,9 +175,13 @@ unless defined?(MintStats)
     end
   end
 end
-m = MintStats.new($script_args[0])
+rng = $script_args[0] || [0]
+type = ($script_args[1] || "count").to_sym
+rnknm = $script_args[2]
+
+m = MintStats.new(rng)
 m.clear()
 m.prep()
-m.rank($script_args[1].to_sym, $script_args[2])
+m.rank(type, rnknm)
 $script_ret = m
 
