@@ -1,4 +1,8 @@
-ROOT_DIR = "/home/naomi/labs/"
+begin
+  load "config.rb"
+rescue
+  ROOT_DIR = "/home/naomi/labs/"
+end
 load ROOT_DIR + "util.rb"
 load ROOT_DIR + 'lib/rpc/xpc.rb'
 load ROOT_DIR + 'secret/cred.rb' #private file!
@@ -139,6 +143,10 @@ module XPC
       a
     end
 
+    def respond_to?(*arg)
+      false
+    end
+
     def method_missing(name,*arg)
       if @attrs[name.to_s]
         @attrs[name.to_s]
@@ -163,6 +171,10 @@ module XPC
       "#<XPC::CoinPrim>"
     end
 
+    def to_s
+      self.inspect
+    end
+
   end
 
   class Block < CoinPrim
@@ -171,7 +183,11 @@ module XPC
     end
 
     def to_full
-      $rpc_ins.block(self.txid)
+      if self.is_full?
+        self
+      else
+        $rpc_ins.block(self.txid)
+      end
     end
 
     def version
