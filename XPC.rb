@@ -2,6 +2,7 @@ begin
   load "config.rb"
 rescue LoadError 
   ROOT_DIR = "/home/naomi/labs/"
+  DATA_DIR = ROOT_DIR + "/data/"
 end
 load ROOT_DIR + "util.rb"
 load ROOT_DIR + 'lib/rpc/xpc.rb'
@@ -52,6 +53,10 @@ module XPC
       r = getblock(blkh,false)
       $_blk = Block.new(h,r)
       $_blk
+    end
+
+    def lbh
+      getblockcount
     end
 
     def block(arg,hdonly=false)
