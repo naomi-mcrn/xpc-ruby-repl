@@ -84,7 +84,9 @@ unless defined?(MintStats)
       if blklast.nil?
         blklast = $rpc_ins.getblockcount
       end
-      prep(blklast,:update)
+      if (@block_range.last < blklast)        
+        prep(blklast,:update)
+      end
     end
 
     def prep(blkrange=nil,mode=:new)
@@ -131,13 +133,17 @@ unless defined?(MintStats)
       (@block_range[0]..@block_range.last)
     end
     
-    def rank(type=:count,num=10)
+    def rank(type=:count,num=10,fb=-1,lb=-1)
       num ||= 10
       if @rnkdata.nil?
         self.prep
       end
       rnkdic = {}
+      bi = @block_range[0] - 1
       @rnkdata.each do |rd|
+        bi += 1
+        next if fb >= 0 && bi < fb
+        next if lb >= 0 && bi > lb
         ad = nil
         nu = 0
         case type

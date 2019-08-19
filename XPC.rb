@@ -59,6 +59,14 @@ module XPC
       getblockcount
     end
 
+    def ms
+      $_ms = scr(:mint_stats)
+      $_ms.load
+      $_ms.addprep
+      $_ms.save
+      $_ms
+    end
+
     def block(arg,hdonly=false)
       h = nil
       r = nil
