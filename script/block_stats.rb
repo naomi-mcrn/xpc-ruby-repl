@@ -128,9 +128,13 @@ unless defined?(BlockStats)
         end
         
         blk = $rpc_ins.block(bh)
-        @rnkdata.push({:minter => blk.minter, :stakeage => blk.stakeage, :rewards => blk.rewards, :rewardsum => blk.rewardsum, :capital => blk.capital})
+        @rnkdata.push(blk.stats)
       end
       (@block_range[0]..@block_range.last)
+    end
+
+    def raw_data
+      @rnkdata
     end
     
     def rank(type=:count,num=10,fb=-1,lb=-1)

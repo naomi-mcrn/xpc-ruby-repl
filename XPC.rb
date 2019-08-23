@@ -66,8 +66,10 @@ module XPC
     def bs(autosync=true)
       $_bs = scr(:block_stats)
       $_bs.load
-      $_bs.addprep if autosync
-      $_bs.save
+      if autosync
+        $_bs.addprep
+        $_bs.save
+      end
       $_bs
     end
 
