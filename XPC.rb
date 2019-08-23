@@ -59,12 +59,16 @@ module XPC
       getblockcount
     end
 
-    def ms
-      $_ms = scr(:mint_stats)
-      $_ms.load
-      $_ms.addprep
-      $_ms.save
-      $_ms
+    def lb
+      lastblock
+    end
+
+    def bs(autosync=true)
+      $_bs = scr(:block_stats)
+      $_bs.load
+      $_bs.addprep if autosync
+      $_bs.save
+      $_bs
     end
 
     def block(arg,hdonly=false)
@@ -298,6 +302,31 @@ module XPC
       end
     end
 
+    def stats
+      blk = self
+      {
+        hash: @attrs["hash"],
+        height: @attrs["height"],
+        version: @attrs["version"],
+        time: @attrs["time"],
+        bits: @attrs["bits"],
+        nonce: @attrs["nonce"],
+        merkleroot: @attrs["merkleroot"],
+        phash: @attrs["previousblockhash"],
+
+        minter: blk.minter, 
+        stakeage: blk.stakeage, 
+        rewards: blk.rewards,
+        rewardsum: blk.rewardsum, 
+        capital: blk.capital,
+
+        ntx: @attrs["nTx"],
+        size: @attrs["size"],
+        ssize: @attrs["strippedsize"],
+        weight: @attrs["weight"],
+      }
+    end
+
     def inspect
       "#<XPC::Block full=#{is_full?} height=#{@attrs['height']} hash=#{@attrs['hash']}>"
     end    
@@ -312,6 +341,26 @@ module XPC
 
     def blocktime
        ::Time.at(@attrs["blocktime"])
+    end
+
+    def prevtxo(i)
+      $rpc_ins.tx(self.vin[i]["txid"]).vout[self.vin[i]["vout"]]
+    end
+
+    def prevaddrs(i)
+      begin
+        self.prevtxo(i)["scriptPubKey"]["addresses"]
+      rescue 
+        nil
+      end
+    end
+
+    def addrs(i)
+      begin
+        self.vout[i]["scriptPubKey"]["addresses"]
+      rescue 
+        nil
+      end
     end
 
     def inspect
