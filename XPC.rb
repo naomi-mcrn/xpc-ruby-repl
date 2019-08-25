@@ -144,6 +144,27 @@ module XPC
       lst
     end
 
+    def dbschm(name,*args)
+      begin
+        $dbschema_ret = nil
+        $dbschema_args = args
+        1.times do
+          fn = ::ROOT_DIR + "/dbschm/#{name.to_s}.rb"
+          self.send(:eval,File.readlines(fn).join("\n"))
+        end
+        $dbschema_ret
+      rescue => e
+        puts e.to_s
+        nil
+      end
+    end
+
+    def listdbschm(query=nil)
+      lst = Dir.entries(::ROOT_DIR + "/dbschm").select{|n| n =~ /.+\.rb/ && (query.nil? || n =~ /#{query}/)}.map{|n| n.gsub(/\.rb/,"").to_sym}
+      puts lst
+      lst
+    end
+
     def bench(&block)
       raise "no block given" unless block_given?
       t1 = Time.now
@@ -311,7 +332,7 @@ module XPC
         height: @attrs["height"],
         version: @attrs["version"],
         time: @attrs["time"],
-        bits: @attrs["bits"],
+        bits: @attrs["bits"].to_i(16),
         nonce: @attrs["nonce"],
         merkleroot: @attrs["merkleroot"],
         phash: @attrs["previousblockhash"],
