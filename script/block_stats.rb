@@ -1,197 +1,235 @@
+require 'sqlite3'
+
 $script_args ||= []
-#if $script_args.length < 2
-#  raise ArgumentError.new("wrong number of arguments (given #{$script_args.length}, expected 2)")
-#end
+
 unless defined?(BlockStats)
   class BlockStats
-    def initialize(blkrange)
-      self.init(blkrange)
-      self.clear()
+  
+    def initialize
+      self._db
+      self
+    end
+
+    def maxblock
+      _db.execute("select max(height) As result from block_stats;")[0]["result"]
+    end
+
+    def _db
+      if @db.nil? || @db.closed?
+        @db = SQLite3::Database.new DATA_DIR + "block_stats.db"
+        @db.results_as_hash = true
+        @db.busy_handler do |d,r|
+          puts "SQLite3: BUSY retry=#{r}"
+          true #always retry
+        end
+      end
+      @db
+    end
+
+    def _bwc
+      puts "warning: for backward compatible only (do nothing)"
+      true
+    end
+
+    def save(*args)
+      self._bwc
     end
     
-    def init(blkrange)
-      @block_range = nil
-      case true
-        when blkrange.is_a?(Integer)
-          lh = $rpc_ins.lastblock.height
-          @block_range = ((lh - blkrange + 1)..lh).to_a
-        when blkrange.is_a?(Range)
-          @block_range = blkrange.to_a
-        when blkrange.is_a?(Array)   
-          @block_range = blkrange.dup
-        else
-          raise TypeError.new("#{blkrange.class} can't convert to array.")
-      end
-      (@block_range[0]..@block_range.last)
+    def load(*args)
+      self._bwc
     end
-
-    def save(filename=nil)
-      begin
-        if (@rnkdata.nil? || @rnkdata.length < 1)
-          raise "blockstats not prepared"
-        end
-        if @block_range[0] + @rnkdata.length - 1 != @block_range.last
-          raise "block range is not continuous"
-        end 
-        filename = filename.to_s.split("/").last.to_s.split("\\").last.to_s.split(".").last.to_s
-        if filename != ""
-          filename = "_#{filename}"
-        end
-        fn = DATA_DIR + "block_stats#{filename}.dat"
-        File.open(fn,"wb") do |f|
-          f.write([@block_range[0]].pack("Q!"))
-          f.write(Marshal.dump(@rnkdata))
-        end
-        true
-      rescue => e
-        puts e.to_s
-        false
-      end
-    end
-
-    def load(filename=nil)
-      begin
-        filename = filename.to_s.split("/").last.to_s.split("\\").last.to_s.split(".").last.to_s
-        if filename != ""
-          filename = "_#{filename}"
-        end
-        fn = DATA_DIR + "block_stats#{filename}.dat"
-        _blkrng_bgn = -1
-        _rnkdat = nil
-        File.open(fn,"rb") do |f|
-          _blkrng_bgn = f.read(8).unpack("Q!")[0]
-          _rnkdat = Marshal.load(f.read(f.size - 8))
-        end
-        @block_range = (_blkrng_bgn..(_blkrng_bgn + _rnkdat.length - 1)).to_a
-        @rnkdata = _rnkdat
-        true
-      rescue => e
-        puts e.to_s
-        false
-      end
+      
+    def init(*args)
+      self._bwc
     end
     
     def clear
-      @rnkdata = nil
+      puts "warning: clear from #{self.class} is disabled! (DANGEROUS!)"
+      nil
     end 
 
     def supmsg(sup)
       @supmsg = sup
     end
     
-    def addprep(blklast=nil)
-      raise "not prepared yet!" if @rnkdata.nil?
+    def addprep(blklast=nil,debug=false)
       if blklast.nil?
         blklast = $rpc_ins.getblockcount
       end
-      if (@block_range.last < blklast)        
+      puts "current last block (coind) = #{$rpc_ins.getblockcount}, blklast = #{blklast}, maxblock = #{self.maxblock}" if debug
+      if (self.maxblock < blklast)        
         prep(blklast,:update)
       end
     end
 
-    def prep(blkrange=nil,mode=:new)
+    def prep(blklast=nil,mode=:update)
+      raise "last block must be set" if blklast.nil?
+      raise "last block must be numeric" unless blklast.is_a?(Numeric)
       oldlast = -1
-      if blkrange
+      if blklast
         case mode
-          when :new
-            self.init(blkrange)
           when :update
-            oldlast = @block_range.last
-            self.init(@block_range[0]..blkrange)
+            oldlast = self.maxblock
+          when :reorgfix
+            oldlast = blklast - 1
           else
-            raise
+            raise "not supported #{mode}"
         end
       end
-
-      rng = nil
-      fbh = -1
-      bw = -1
-      if mode == :new
-        rng = @block_range
-        @rnkdata = []
-        fbh = @block_range[0]
-        bw = @block_range.last - fbh + 1
-      else
-        rng = ((oldlast + 1)..@block_range.last).to_a 
-        @rnkdata ||= []
-        fbh = rng[0]
-        bw = rng.last - fbh + 1
-      end
+   
+      rng_bgn = (oldlast + 1)
+      rng_end = blklast 
+      fbh = rng_bgn
+      bw = rng_end - fbh + 1
+     
       progper = 0
-      puts "preparing BlockStats...(mode = #{mode.to_s}, from #{rng[0]} to #{rng.last})" unless @supmsg
-      rng.each do |bh|
-        bd = bh - fbh + 1
-        cper = (bd * 100.0 / bw).to_i
-        if !@supmsg && cper != progper
-          puts "%03d %%" % cper
-          progper = cper
-        end
+      puts "preparing BlockStats...(mode = #{mode}, from #{rng_bgn} to #{rng_end})" unless @supmsg
+      _db.transaction do
+        (rng_bgn..rng_end).each do |bh|
+          bd = bh - fbh + 1
+          cper = (bd * 100.0 / bw).to_i
+          if !@supmsg && cper != progper
+            puts "%03d %%" % cper
+            progper = cper
+          end
+
+          if mode == :reorgfix
+            oldhash = _db.execute("select hash from block_stats where height = ?",bh)[0]["hash"]
+            _db.execute("delete from block_stats where height = ?",bh)
+            _db.execute("delete from rewards where hash = ?",oldhash)
+          end
         
-        blk = $rpc_ins.block(bh)
-        @rnkdata.push(blk.stats)
+          blk = $rpc_ins.block(bh)
+          d = blk.stats
+          
+          _db.execute("insert into block_stats values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);",
+                     d[:hash],
+                     d[:height],
+                     d[:version],
+                     d[:time],
+                     d[:bits],
+                     d[:nonce],
+                     d[:merkleroot],
+                     d[:phash],
+                     d[:minter],
+                     d[:stakeage],
+                     d[:capital],
+                     d[:ntx],
+                     d[:size],
+                     d[:ssize],
+                     d[:weight])
+          
+          
+          d[:rewards].each_with_index do |rwd,i|
+            _db.execute("insert into rewards values (?,?,?,?);",
+                       d[:hash],
+                       i,
+                       rwd.keys[0],
+                       rwd.values[0])
+            
+          end
+
+        end
       end
-      (@block_range[0]..@block_range.last)
+      (0..self.maxblock)
     end
 
     def raw_data
-      @rnkdata
+      puts "warning: raw_data is disabled. use data(height) for individual data"
+      nil
+    end
+
+    def data(bh)
+      res = _db.execute("select * from block_stats where height = ?",bh)[0]
+      if res
+        r2 = _db.execute("select idx,receiver,value from rewards where hash = ? order by idx",res["hash"])
+        if r2 && r2.length > 0
+          res.update("rewards" => r2)
+          rs = 0.0
+          r2.each do |rwd|
+            rs += rwd["value"]
+          end
+          res.update("rewardsum" => rs)
+        end
+      end
+      res
     end
     
-    def rank(type=:count,num=10,fb=-1,lb=-1)
+    def rank(type=:count,num=10,fb=-1,lb=-1,fd=nil)
       num ||= 10
-      if @rnkdata.nil?
-        self.prep
+      sql = nil
+      psql = []
+      pprm = []
+      fb = fb.to_i
+      lb = lb.to_i
+     
+      if fb > -1
+        psql.push("height >= ?")
+        pprm.push(fb)
       end
-      rnkdic = {}
-      bi = @block_range[0] - 1
-      @rnkdata.each do |rd|
-        bi += 1
-        next if fb >= 0 && bi < fb
-        next if lb >= 0 && bi > lb
-        ad = nil
-        nu = 0
-        case type
-          when :count
-            ad = rd[:minter]
-              nu = 1
-          when :reward
-            ad = rd[:minter]
-            nu = rd[:rewardsum]
-          when :capital
-            ad = rd[:minter]
-            nu = rd[:capital] 
-          when :rewardto,:increase,:give,:take
-            raise "not yet implemented"
-        end
-        
-        if ad && nu > 0
-          if rnkdic[ad].nil?
-            rnkdic.update({ad => nu})
-          else
-            rnkdic[ad] += nu
+      if lb > -1
+        psql.push("height <= ?")
+        pprm.push(lb)
+      end
+
+      case type
+        when :count
+          sql = "select minter as r1,count(*) as r2 from block_stats where minter is not null"
+   
+          if psql.length > 0
+            sql += " and " + psql.join(" and ")
           end
+          sql +=" group by r1 order by r2 desc;"
+        when :reward
+          sql = "select minter as r1,sum(value) as r2 from block_stats inner join rewards on block_stats.hash = rewards.hash where minter is not null"
+
+          if psql.length > 0
+            sql += " and " + psql.join(" and ")
+          end
+          sql +=" group by r1 order by r2 desc;"           
+        when :capital
+          sql = "select minter as r1,capital as r2 from block_stats where minter is not null"
+
+          if psql.length > 0
+            sql += " and " + psql.join(" and ")
+          end
+          sql +=" group by r1 order by r2 desc;" 
+        when :increase
+          sql = "select minter as r1,avg(stakeage) as r2 from block_stats where minter is not null"
+
+          if psql.length > 0
+            sql += " and " + psql.join(" and ")
+          end
+          sql +=" group by r1 order by r2 desc;"
+        when :rewardto,:give,:take
+          raise "not yet implemented"
+      end
+        
+      if sql
+        sql += " limit #{num}"
+        #puts sql
+        lcnt = 0
+        _db.execute(sql,*pprm).each_with_index do |rcd,i|
+          aa = "#{i+1},#{rcd['r1']},#{rcd['r2']}"
+          if fd
+            fd.write(aa+"\n")
+          else
+            puts aa
+          end
+          lcnt += 1
+          break if lcnt >= num
         end
       end
-      rnkbrd = rnkdic.to_a.map{|e| e.flatten}.sort{|a,b| b[1] <=> a[1]}
-      num.times do |i|
-        break if rnkbrd[i].nil?
-        puts "#{i+1},#{rnkbrd[i][0]}, #{rnkbrd[i][1]}"
-      end
+     
       nil
     end
 
     def inspect
-      "#<XPC::RPC::BlockStats blockrange=#{@block_range[0]}..#{@block_range.last}>"
+      "#<XPC::RPC::BlockStats blockrange=#0..#{self.maxblock}>"
     end
   end
 end
-rng = $script_args[0] || [0]
-type = ($script_args[1] || "count").to_sym
-rnknm = $script_args[2]
 
-bs = BlockStats.new(rng)
-bs.clear()
-bs.prep()
-# bs.rank(type, rnknm)
+bs = BlockStats.new()
 $script_ret = bs
 

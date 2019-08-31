@@ -63,12 +63,12 @@ module XPC
       lastblock
     end
 
-    def bs(autosync=true)
+    def bsc(autosync=true)
       $_bs = scr(:block_stats)
-      $_bs.load
+      #$_bs.load
       if autosync
         $_bs.addprep
-        $_bs.save
+        #$_bs.save
       end
       $_bs
     end
@@ -124,7 +124,7 @@ module XPC
     end
 
     def scr(name,*args)
-      begin
+      #begin
         $script_ret = nil
         $script_args = args
         1.times do
@@ -132,10 +132,10 @@ module XPC
           self.send(:eval,File.readlines(fn).join("\n"))
         end
         $script_ret
-      rescue => e
-        puts e.to_s
-        nil
-      end
+      #rescue => e
+      #  puts e.to_s
+      #  nil
+      #end
     end
     
     def listscr(query=nil)
@@ -240,6 +240,11 @@ module XPC
     
     def mediantime
       ::Time.at(@attrs["mediantime"])
+    end
+
+    #lightweight count of tx
+    def txcount
+      @attrs['tx'].length
     end
 
     def tx
@@ -386,8 +391,99 @@ module XPC
       end
     end
 
+    def txo
+      unless @txo_cache
+        @txo_cache = []
+        self.vout.each do |vo|
+          @txo_cache.push(TxOut.new(@attrs['txid'],vo))
+        end
+      end
+      @txo_cache
+    end
+
+    def txi
+      unless @txi_cache
+        @txi_cache = []
+        self.vin.each_with_index do |vi,i|
+          @txi_cache.push(TxIn.new(@attrs['txid'],i,vi))
+        end
+      end
+      @txi_cache
+    end
+
+
     def inspect
-      "#<XPC::Tx txid=#{@attrs['txid']} hash=#{@attrs['hash']}"
+      "#<XPC::Tx txid=#{@attrs['txid']} hash=#{@attrs['hash']}>"
+    end
+  end
+
+  class TxOut < CoinPrim
+    def initialize(txid,vo)
+      @attrs = {'txid' => txid, 'n' => vo['n'], 'value' => vo['value'], 'type' => 'nonstandard', 'address' => nil }
+      if vo['scriptPubKey']
+        sp = vo['scriptPubKey']
+        if sp['type']
+          @attrs.update('type' => sp['type'])
+        end
+        if sp['addresses'] && sp['addresses'].length >= 1
+          @attrs.update('address' => sp['addresses'][0])
+          if sp['addresses'].length > 1
+            @attrs.update('type' => 'notsupported')
+          end
+        end
+      end
+      @raw_data = nil
+    end
+
+    def address
+      @attrs['address'] || nil
+    end
+
+    def inspect
+      "#<XPC::TxOut txid=#{@attrs['txid']} n=#{@attrs['n']}>"
+    end
+  end
+
+  class TxIn < CoinPrim
+    def initialize(txid,n,vi)
+      @attrs = {'txid' => txid, 'n' => n, 'rtxid' => vi['txid'], 'rn' => vi['vout'], 'coinbase' => false}
+      if vi['coinbase']
+        @attrs.update('coinbase' => true)
+      end
+    end
+
+    def is_coinbase?
+      @attrs['coinbase'] == true
+    end
+
+    def rtxid
+      self.is_coinbase? ? "coinbase" : @attrs['rtxid']
+    end
+
+    def rn
+      self.is_coinbase? ? 0 : @attrs['rn']
+    end
+
+    def tx_ref
+      return nil if self.is_coinbase?
+      unless @txref_cache
+        @txref_cache = $rpc_ins.tx(@attrs['rtxid'])
+      end
+      @txref_cache
+    end
+
+    def txo_ref
+      return nil if self.is_coinbase?
+      begin
+        self.tx_ref.txo[@attrs['rn']]
+      rescue => e
+        puts e.to_s
+        nil
+      end
+    end
+    
+    def inspect
+      "#<XPC::TxIn txid=#{@attrs['txid']} n=#{@attrs['n']} rtxid=#{@attrs['rtxid']} rn=#{@attrs['rn']}>"
     end
   end
 end
