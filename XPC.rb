@@ -47,6 +47,10 @@ module XPC
       method_missing(name,*arg)
     end
 
+    def api(*args)      
+      # Net::HTTP.get_response(URI.parse("https://cvmu.jp/insight/xpc/api/addr/xpc1qqkuhhesrqt45wcqhahlmh8y7g9dufkwnuyyhe6/balance"))
+    end
+
     def lastblock
       blkh = getblockhash(getblockcount)
       h = getblock(blkh,true)
@@ -71,6 +75,22 @@ module XPC
         #$_bs.save
       end
       $_bs
+    end
+
+    def csc(autosync=false)
+      $_cs = scr(:chain_stats)
+      if autosync
+        $_cs.addprep
+      end
+      $_cs
+    end
+
+    def cs
+      if $_cs.nil?
+        puts "init ChainState (once)"
+        csc(false)
+      end
+      $_cs
     end
 
     def block(arg,hdonly=false)
@@ -112,7 +132,7 @@ module XPC
         dattr = getrawtransaction(txid,true)
         rawtx = dattr.delete("hex")
       end
-      attr = decoderawtransaction(rawtx)
+      attr = decoderawtransaction(rawtx,true) #must be TRUE!!
       dattr.update(attr)
       $_tx = Tx.new(dattr,rawtx)
         $_tx
@@ -188,7 +208,7 @@ module XPC
     end
 
     def method_missing(name,*arg)
-      if @attrs[name.to_s]
+      if @attrs.include?(name.to_s)
         @attrs[name.to_s]
       else
         super(name,*arg)
@@ -262,12 +282,28 @@ module XPC
     def next
       if @attrs["nextblockhash"]
         $rpc_ins.block(@attrs["nextblockhash"])
+      else
+        nil
       end
     end
 
     def prev
-      $rpc_ins.block(@attrs["previousblockhash"])
+      if @attrs["previousblockhash"]
+        $rpc_ins.block(@attrs["previousblockhash"])
+      else
+        nil
+      end
     end
+
+    #avoid error on tip
+    def nextblockhash
+      @attrs["nextblockhash"]
+    end
+    
+    #avoid error on genesis
+    def previousblockhash
+      @attrs["previousblockhash"]
+    end    
 
     def stakeage
       if tx.length < 2
