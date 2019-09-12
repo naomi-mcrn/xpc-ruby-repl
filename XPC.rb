@@ -1,3 +1,5 @@
+require "net/http"
+
 begin
   load "config.rb"
 rescue LoadError 
@@ -12,6 +14,11 @@ $_tx = nil
 module XPC
   GENESIS_BLOCK_HASH = "000000009f4a28557aad6be5910c39d40e8a44e596d5ad485a9e4a7d4d72937c"
   GENESIS_COINBASE_TXID = "daa610662c202dd51c892e6ff17ac1812a3ddcb998ec4923a3a315c409019739"
+
+  COINBASE_MATURE = 101
+
+  INSIGHT_URL_TEST = "https://cvmu.jp/insight/xpc/"
+  INSIGHT_URL = "https://insight.xpchain.io/"
 
   class ShellRPCRepl
     def method_missing(name,*arg)
@@ -47,8 +54,34 @@ module XPC
       method_missing(name,*arg)
     end
 
-    def api(*args)      
-      # Net::HTTP.get_response(URI.parse("https://cvmu.jp/insight/xpc/api/addr/xpc1qqkuhhesrqt45wcqhahlmh8y7g9dufkwnuyyhe6/balance"))
+    def api(*args)
+      _api(:main,*args)
+    end
+    
+    def api_test(*args)
+      _api(:test,*args)
+    end
+
+    def _api(mode,*args)      
+      begin
+        prms = []
+        hprm = []
+        args.each do |a|
+          if a.is_a?(Hash)
+            a.each do |k,v|
+              hprm.push("#{k}=#{v}")
+            end
+          else
+            prms.push(a.to_s)
+          end
+        end
+        url_string = "#{mode == :main ? ::XPC::INSIGHT_URL : ::XPC::INSIGHT_URL_TEST}api/#{prms.join('/')}?#{hprm.join('&')}"
+        res = Net::HTTP.get_response(URI.parse(url_string))
+        JSON.parse(res.body)
+      rescue => e
+        puts e.to_s
+        nil
+      end
     end
 
     def lastblock
@@ -335,7 +368,9 @@ module XPC
     def rewards
       begin        
         rwd = []
-        self.tx[0].vout.each{|v| rwd.push({v["scriptPubKey"]["addresses"][0] => v["value"]}) if v["value"] > 0}
+        self.tx[0].vout.each do |v|
+          rwd.push({v["scriptPubKey"]["addresses"][0] => v["value"]}) if v["value"] > 0
+        end
         rwd
       rescue => e
         puts "ERROR: " + e.to_s
@@ -520,6 +555,118 @@ module XPC
     
     def inspect
       "#<XPC::TxIn txid=#{@attrs['txid']} n=#{@attrs['n']} rtxid=#{@attrs['rtxid']} rn=#{@attrs['rn']}>"
+    end
+  end
+
+  class Address < CoinPrim
+    def initialize(addr)
+      @raw_data = addr
+      @attrs = {
+        "address" => addr
+      }
+      #below suggest is too rough...
+      p = addr[0]
+      type = "unknown"
+      case p
+        when "X"
+          type = "legacy"
+        when "C"
+          type = "p2sh_segwit"
+        when "x"
+          if p.length > 43
+            type = "p2wsh"
+          else
+            type = "p2wpkh"
+          end        
+      end
+      @attrs.update({"type" => type})
+    end
+
+    def to_s
+      @attrs["address"]
+    end
+
+    def type
+      @attrs["type"]
+    end
+
+    def balance(api=false)
+      if api
+        $rpc_ins.api("addr",self.to_s,"balance").to_i / 10000.0
+      else
+        $rpc_ins.cs._db.execute("select sum(value*10000) as balance from txos where sp_height = 0 and address = ?;",self.to_s)[0]["balance"].to_i / 10000.0
+      end
+    end
+
+    def utxos(api=false)
+      #WARNING: different info returned between api and local DB.
+      if api
+        $rpc_ins.api("addr",self.to_s,"utxoExt").to_a.map{|au| UnspentTxOut.new(au)}
+      else
+        $rpc_ins.cs._db.execute("select * from txos where sp_height = 0 and address = ?",self.to_s)
+      end
+    end
+
+    def txs(api=false,safety_unlock=false)
+      if !safety_unlock
+        puts "ERROR: safety is locked. this method is TOOOOOO HEAVY!!" 
+        return []
+      end
+      
+      txs = []
+      if api
+        rtxs = $rpc_ins.api("txs",{"address" => "xpc1qvnrq3nyeklmmcev77yxs0997raxh7q4cry39gk"}).to_h["txs"].to_a
+        rtxs.each do |rtx|
+          txs.push($rpc_ins.tx(rtx["txid"]))
+        end
+      else
+        saddr = self.to_s
+        rtxs = $rpc_ins.cs._db.execute("select sp_height as h,sp_idx as t from txos where sp_height <> 0 and address = ? union select height as h,idx as t from txos where sp_height = 0 and address = ? order by h desc,t;",saddr,saddr)
+        rtxs.each do |rtx|
+          blk = $rpc_ins.block(rtx["h"])
+          if blk
+            ttx = blk.tx[rtx["t"]]
+            if ttx
+              txs.push(ttx)
+            end
+          end
+        end
+      end
+      txs
+    end
+
+    def inspect
+      "#<XPC::Address #{@attrs['address']} type=#{@attrs['type']}>"
+    end
+  end
+
+  class UnspentTxOut < TxOut
+    def initialize(au)
+      @attrs = {'txid' => au['txid'], 'n' => au['vout'], 'value' => au['amount'], 'address' => au['address'], 'time' => ::Time.at(au['ts']), 'script' => au['scriptPubKey'], 'confirm' => au['confirmations'].to_i, 'coinbase' => false}
+      if au['isCoinBase']
+        @attrs.update({"coinbase" => true, "mature" => (au['confirmations'].to_i >= ::COINBASE_MATURE)})
+      end
+      @raw_data = au
+    end
+
+    def is_coinbase?
+      @attrs['coinbase']
+    end
+
+    def is_spendable?
+      @attrs['coinbase'] ? @attrs['mature'] : (@attrs['confirm'] > 0)
+    end
+
+    def address
+      @attrs['address'] || nil
+    end
+
+    def txo
+      $rpc_ins.tx(@attrs['txid']).txo[@attrs['n']]
+    end
+
+    def inspect
+      "#<XPC::UnspentTxOut txid=#{@attrs['txid']} n=#{@attrs['n']} spendable=#{self.is_spendable?}>"
     end
   end
 end

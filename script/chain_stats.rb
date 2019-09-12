@@ -207,6 +207,12 @@ unless defined?(ChainStats)
       end
       res
     end
+
+    def rrank(rcnt=1440,type=:count,num=10,fd=nil)
+      h = $rpc_ins.lbh
+      puts "recent rank from #{h-rcnt+1} to #{h} (#{rcnt} block(s))"
+      self.rank(type,num,h-rcnt,h,fd)
+    end
     
     def rank(type=:count,num=10,fb=-1,lb=-1,fd=nil)
       num ||= 10
@@ -322,6 +328,17 @@ unless defined?(ChainStats)
         v = query.to_f
       end
       _db.execute("select count(*) as rnk from richlist where value > ?",v)[0]["rnk"].to_i + 1
+    end
+
+    def addrs(query)
+      query = query.to_s
+      raise "bad query! injection!!" unless (query =~ /^[a-zA-Z0-9]/)
+      r = _db.execute("select address from richlist where address like '%" + query + "';")
+      if r.length > 0
+        r.map{|rr| ::XPC::Address.new(rr["address"])}
+      else
+        nil
+      end
     end
 
     def balance(query)
