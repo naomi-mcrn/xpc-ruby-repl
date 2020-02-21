@@ -5,7 +5,8 @@ loop do
   #begin
     print "."
     if cs.maxblock != $rpc_ins.lbh
-      cs.addprep
+      #cs.supmsg(false)
+      cs.addprep #(nil,true)
     end    
     sleep 30   
   #rescue => e

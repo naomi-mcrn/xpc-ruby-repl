@@ -107,6 +107,10 @@ unless defined?(ChainStats)
      
       progper = 0
       puts "preparing ChainStats...(mode = #{mode}, from #{rng_bgn} to #{rng_end})" unless @supmsg
+      blk = nil
+      dbg_txid = nil
+      dbg_n = -1
+      dbg_phase = -1
      # _db.transaction do
       _db.execute("BEGIN;")
       begin
@@ -132,7 +136,7 @@ unless defined?(ChainStats)
         
           blk = $rpc_ins.block(bh)
           d = blk.stats
-          
+          dbg_phase = 1
           _db.execute("insert into block_stats values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);",
                      d[:hash],
                      d[:height],
@@ -150,7 +154,7 @@ unless defined?(ChainStats)
                      d[:ssize],
                      d[:weight])
           
-          
+          dbg_phase = 2
           d[:rewards].each_with_index do |rwd,i|
             _db.execute("insert into rewards values (?,?,?,?);",
                        d[:hash],
@@ -162,24 +166,33 @@ unless defined?(ChainStats)
 
 
           blk.tx.each_with_index do |ttx,vtx|
+            dbg_phase = 3
+            dbg_txid = nil
+            dbg_n = -1
             ttx.txi.each_with_index do |ti,vi|
-              unless ti.is_coinbase?                               
+              unless ti.is_coinbase?
                 _db.execute("update txos set sp_height=?,sp_idx=?,sp_n=? where txid=? and n=?;",blk.height,vtx,vi,ti.rtxid,ti.rn)
               end
             end
+            dbg_phase = 4
             ttx.txo.each_with_index do |to,vo|
               next if to.address.nil?
+              dbg_txid = to.txid
+              dbg_n = to.n
               _db.execute("insert into txos values (?,?,?,?,?,?,?,?,?,?,?);",
                           to.txid,to.n,blk.hash,blk.height,vtx,to.type,to.address,to.value,
                           0,0,0)
             end
           end
 
-
+          dbg_phase = 0
         end
         _db.execute("COMMIT;")
       rescue => e
         _db.execute("ROLLBACK;")
+        errmsg = "prep FAILED!! #{e.to_s} at block #{blk.height}(#{blk.hash}), phase = #{dbg_phase}, txid=#{dbg_txid}, n=#{dbg_n}"
+        puts errmsg
+        raise errmsg
       end
 
       
@@ -283,6 +296,15 @@ unless defined?(ChainStats)
       nil
     end
 
+    def totaladdrs(nobalance=false)
+      if nobalance
+        _db.execute("select count(*) as num from (select distinct address from txos)")[0]["num"]
+      else
+        prep_richlist
+        _db.execute("select count(*) as num from richlist;")[0]["num"]
+      end
+    end
+
     def prep_richlist
       _db.transaction do
         mb = self.maxblock
@@ -330,10 +352,23 @@ unless defined?(ChainStats)
       _db.execute("select count(*) as rnk from richlist where value > ?",v)[0]["rnk"].to_i + 1
     end
 
-    def addrs(query)
+    def addrs(query,nobalance=false)
       query = query.to_s
-      raise "bad query! injection!!" unless (query =~ /^[a-zA-Z0-9]/)
-      r = _db.execute("select address from richlist where address like '%" + query + "';")
+      if query != ""
+        raise "bad query! injection!!" unless (query =~ /^[a-zA-Z0-9]/)
+      end
+      sql = ""
+      if nobalance
+        sql = "select distinct address from txos"
+      else
+        sql = "select address from richlist"
+      end     
+      if query == ""
+        sql += ";"
+      else
+        sql += " where address like '%" + query + "';"
+      end      
+      r = _db.execute(sql)
       if r.length > 0
         r.map{|rr| ::XPC::Address.new(rr["address"])}
       else
