@@ -50,6 +50,13 @@ module XPC
   end
 
   class RPCRepl < HTTPRPCRepl
+    def initialize
+      super
+      self.cs
+      puts "blocks: #{lbh}(RPC), #{$_cs.maxblock}(ChainStats)"
+      self
+    end
+    
     def rpc(name,*arg)
       method_missing(name,*arg)
     end

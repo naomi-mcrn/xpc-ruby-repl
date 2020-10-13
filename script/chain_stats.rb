@@ -23,7 +23,7 @@ unless defined?(ChainStats)
         @db = SQLite3::Database.new DATA_DIR + "chain_stats.db"
         @db.results_as_hash = true
         @db.busy_handler do |d,r|
-          puts "SQLite3: BUSY retry=#{r}"
+          # puts "SQLite3: BUSY retry=#{r}"
           true #always retry
         end
       end
@@ -221,10 +221,14 @@ unless defined?(ChainStats)
       res
     end
 
+    def rdp(day=1,num=10,fd=nil)
+      self.rrank(1440*day,:per,num,fd)
+    end
+
     def rrank(rcnt=1440,type=:count,num=10,fd=nil)
       h = $rpc_ins.lbh
       puts "recent rank from #{h-rcnt+1} to #{h} (#{rcnt} block(s))"
-      self.rank(type,num,h-rcnt,h,fd)
+      self.rank(type,num,h-rcnt+1,h,fd)
     end
     
     def rank(type=:count,num=10,fb=-1,lb=-1,fd=nil)
@@ -234,6 +238,7 @@ unless defined?(ChainStats)
       pprm = []
       fb = fb.to_i
       lb = lb.to_i
+      wblks = (lb - fb) + 1
      
       if fb > -1
         psql.push("height >= ?")
@@ -245,7 +250,7 @@ unless defined?(ChainStats)
       end
 
       case type
-        when :count
+        when :count,:per
           sql = "select minter as r1,count(*) as r2 from block_stats where minter is not null"
    
           if psql.length > 0
@@ -281,8 +286,19 @@ unless defined?(ChainStats)
         sql += " limit #{num}"
         #puts sql
         lcnt = 0
+        domi = 0
+        tmdp = 0.0
         _db.execute(sql,*pprm).each_with_index do |rcd,i|
-          aa = "#{i+1},#{rcd['r1']},#{rcd['r2']}"
+          v1 = rcd['r1']
+          v2 = rcd['r2']
+          if type == :per
+            domi += v2
+            v2 = v2 * 100.0 / wblks
+            tmdp = domi * 100.0 / wblks
+            v2 = ("   " + ("%.2f" % v2))[-6,6]
+            v2 = v2 + "," + ("   " + ("%.2f" % tmdp))[-6,6]
+          end
+          aa = "#{i+1},#{v1},#{v2}"
           if fd
             fd.write(aa+"\n")
           else
